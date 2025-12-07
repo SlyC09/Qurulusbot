@@ -16,14 +16,14 @@ from telebot.types import (
 # ---------------------------------------------------------------------
 
 # Токен Telegram-бота
-TOKEN = os.environ.get("USER_BOT_TOKEN", "PLEASE_SET_USER_BOT_TOKEN")
+TOKEN = os.environ.get("USER_BOT_TOKEN", "8387381145:AAGnHA7Pm5e4O4Gm6L9ol-pDNQeM8xpNdT4")
 
 # Базовый URL вашего Node API
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://rfid.gutario.com/api")
 
 # Секрет, который Node проверяет в middleware/telegramAuth.js
 # Должен совпадать с process.env.TG_BOT_TOKEN на сервере
-API_AUTH_TOKEN = os.environ.get("TG_BOT_TOKEN", "PLEASE_SET_TG_BOT_TOKEN")
+API_AUTH_TOKEN = os.environ.get("TG_BOT_TOKEN", "b$RdMt8c40Fy*eUYJV[S#q74jhy[+ZTk@QH%go=8[cGcXiNorN+hLrD5BO]vp9BE")
 
 logging.basicConfig(
     level=logging.INFO,
