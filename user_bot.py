@@ -1,7 +1,8 @@
 import os
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
+import requests
 import telebot
 from telebot.types import (
     ReplyKeyboardMarkup,
@@ -10,22 +11,19 @@ from telebot.types import (
     InlineKeyboardButton,
 )
 
-from db import (
-    init_db,
-    create_appeal,
-    get_appeal,
-    STATUS_NEW,
-    STATUS_IN_PROGRESS,
-    STATUS_WAITING_INFO,
-    STATUS_CLOSED_CONFIRMED,
-    STATUS_CLOSED_NOT_CONFIRMED,
-    STATUS_REJECTED,
-)
-
 # ---------------------------------------------------------------------
 # НАСТРОЙКИ
 # ---------------------------------------------------------------------
-TOKEN = os.environ.get("USER_BOT_TOKEN", "8387381145:AAGnHA7Pm5e4O4Gm6L9ol-pDNQeM8xpNdT4")
+
+# Токен Telegram-бота
+TOKEN = os.environ.get("USER_BOT_TOKEN", "PLEASE_SET_USER_BOT_TOKEN")
+
+# Базовый URL вашего Node API
+API_BASE_URL = os.environ.get("API_BASE_URL", "https://rfid.gutario.com/api")
+
+# Секрет, который Node проверяет в middleware/telegramAuth.js
+# Должен совпадать с process.env.TG_BOT_TOKEN на сервере
+API_AUTH_TOKEN = os.environ.get("TG_BOT_TOKEN", "PLEASE_SET_TG_BOT_TOKEN")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,8 +33,20 @@ logging.basicConfig(
 bot = telebot.TeleBot(TOKEN)
 
 # ---------------------------------------------------------------------
+# СТАТУСЫ (синхронизированы с Node)
+# ---------------------------------------------------------------------
+
+STATUS_NEW = "new"
+STATUS_IN_PROGRESS = "in_progress"
+STATUS_WAITING_INFO = "waiting_info"
+STATUS_CLOSED_CONFIRMED = "closed_confirmed"
+STATUS_CLOSED_NOT_CONFIRMED = "closed_unconfirmed"
+STATUS_REJECTED = "rejected"
+
+# ---------------------------------------------------------------------
 # ЯЗЫКИ / ПЕРЕВОДЫ
 # ---------------------------------------------------------------------
+
 LANG_RU = "ru"
 LANG_KK = "kk"
 
@@ -83,6 +93,7 @@ def main_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
 # ---------------------------------------------------------------------
 # СОСТОЯНИЯ
 # ---------------------------------------------------------------------
+
 STATE_NONE = None
 STATE_CONSENT = "consent"
 STATE_IDENTITY = "identity"
@@ -101,7 +112,7 @@ STATE_CAN_CONTACT = "can_contact"
 STATE_CONFIRM = "confirm"
 
 # chat_id -> state / data
-user_state: Dict[int, str] = {}
+user_state: Dict[int, Optional[str]] = {}
 user_data: Dict[int, Dict[str, Any]] = {}
 
 
@@ -109,9 +120,9 @@ def get_lang_by_chat(chat_id: int) -> str:
     return user_data.get(chat_id, {}).get("lang", LANG_RU)
 
 
-def set_state(chat_id: int, state: str) -> None:
+def set_state(chat_id: int, state: Optional[str]) -> None:
     user_state[chat_id] = state
-    logging.debug(f"STATE chat={chat_id} -> {state}")
+    logging.debug("STATE chat=%s -> %s", chat_id, state)
 
 
 # ---------------------------------------------------------------------
@@ -134,8 +145,77 @@ def handle_error(chat_id: int, where: str, e: Exception) -> None:
 
 
 # ---------------------------------------------------------------------
+# ВЗАИМОДЕЙСТВИЕ С NODE API
+# ---------------------------------------------------------------------
+
+def _api_headers() -> Dict[str, str]:
+    return {
+        "x-telegram-bot-token": API_AUTH_TOKEN,
+        "Content-Type": "application/json",
+    }
+
+
+def send_appeal_to_backend(data: Dict[str, Any]) -> str:
+    """
+    Отправляем обращение в Node API, возвращаем публичный номер.
+    POST /api/telegram/appeals
+    """
+    url = f"{API_BASE_URL}/telegram/appeals"
+
+    street = data.get("street") or ""
+    house = data.get("house") or ""
+    landmark = data.get("landmark") or ""
+    description = data.get("description") or ""
+    violation_type = data.get("violation_type") or ""
+    danger_level_text = data.get("danger_level") or ""
+
+    payload = {
+        "street": street,
+        "house": house,
+        "landmark": landmark,
+        "description": description,
+        "violationType": violation_type,
+        "dangerText": danger_level_text,
+        "isAnonymous": data.get("is_anonymous", False),
+        "applicantName": data.get("applicant_name"),
+        "phone": data.get("phone"),
+        "email": data.get("email"),
+        "canContact": data.get("can_contact"),
+        "files": data.get("photos") or [],  # список { file_id, type }
+        "telegramUserId": data.get("chat_id"),
+        "language": data.get("language"),
+    }
+
+    logging.info("Sending appeal to backend: %s", payload)
+
+    resp = requests.post(url, json=payload, headers=_api_headers(), timeout=15)
+    resp.raise_for_status()
+    body = resp.json()
+    logging.info("Backend response: %s", body)
+
+    public_id = body.get("appealNumber") or str(body.get("appealId"))
+    return public_id
+
+
+def fetch_appeal_status(public_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Запрашиваем статус обращения по публичному номеру.
+    GET /api/telegram/appeals/:appealNumber
+    """
+    url = f"{API_BASE_URL}/telegram/appeals/{public_id}"
+    resp = requests.get(url, headers=_api_headers(), timeout=10)
+
+    if resp.status_code == 404:
+        return None
+
+    resp.raise_for_status()
+    return resp.json()
+
+
+# ---------------------------------------------------------------------
 # /start + выбор языка (inline-кнопки)
 # ---------------------------------------------------------------------
+
 @bot.message_handler(commands=["start"])
 def cmd_start(message):
     try:
@@ -196,6 +276,7 @@ def cb_language(call):
 # ---------------------------------------------------------------------
 # /new – запуск диалога
 # ---------------------------------------------------------------------
+
 @bot.message_handler(commands=["new"])
 def cmd_new(message):
     try:
@@ -231,8 +312,9 @@ def cmd_new(message):
 
 
 # ---------------------------------------------------------------------
-# /status – проверка статуса
+# /status – проверка статуса (через Node API)
 # ---------------------------------------------------------------------
+
 @bot.message_handler(commands=["status"])
 def cmd_status(message):
     try:
@@ -244,14 +326,20 @@ def cmd_status(message):
                 chat_id,
                 tr(
                     lang,
-                    "Введите номер обращения после команды, например:\n/status 25-000001",
-                    "Búıryqtan keıin ótinish nómirin jazıńyz, mysaly:\n/status 25-000001",
+                    "Введите номер обращения после команды, например:\n/status 25_000001",
+                    "Búıryqtan keıin ótinish nómirin jazıńyz, mysaly:\n/status 25_000001",
                 ),
             )
             return
 
         public_id = parts[1].strip()
-        appeal = get_appeal(public_id)
+
+        try:
+            appeal = fetch_appeal_status(public_id)
+        except Exception as e:
+            handle_error(chat_id, "cmd_status(fetch_appeal_status)", e)
+            return
+
         if not appeal:
             bot.send_message(
                 chat_id,
@@ -263,18 +351,24 @@ def cmd_status(message):
             )
             return
 
-        st = status_label(lang, appeal["status"])
-        comment = appeal.get("last_comment") or tr(
+        status_code = appeal.get("status") or STATUS_NEW
+        st = status_label(lang, status_code)
+
+        comment = appeal.get("lastComment") or tr(
             lang, "Комментарий отсутствует.", "Kommentariı joq."
+        )
+
+        addr = appeal.get("address") or "г. Уральск"
+        deadline = appeal.get("deadline") or tr(
+            lang, "не задан", "kórsetilmegen"
         )
 
         text = (
             tr(lang, "Информация по обращению:", "Ótinish turaly aqparat:")
-            + f"\n\n{tr(lang, 'Номер', 'Nómir')}: {appeal['public_id']}"
+            + f"\n\n{tr(lang, 'Номер', 'Nómir')}: {appeal.get('number') or public_id}"
             + f"\n{tr(lang, 'Статус', 'Kúi')}: {st}"
-            + f"\n{tr(lang, 'Адрес', 'Mekenjai')}: г. Уральск, "
-            f"{appeal.get('street')}, {appeal.get('house')}"
-            + f"\n{tr(lang, 'Срок реагирования', 'Jauap merzimi')}: {appeal.get('deadline')}"
+            + f"\n{tr(lang, 'Адрес', 'Mekenjai')}: {addr}"
+            + f"\n{tr(lang, 'Срок реагирования', 'Jauap merzimi')}: {deadline}"
             + f"\n\n{tr(lang, 'Комментарий', 'Kommentariı')}: {comment}"
         )
         bot.send_message(chat_id, text)
@@ -283,9 +377,10 @@ def cmd_status(message):
 
 
 # ---------------------------------------------------------------------
-# ХЭНДЛЕР МЕДИА (фото/видео) во время шага PHOTOS
+# ХЭНДЛЕР МЕДИА (фото/видео/документы) во время шага PHOTOS
 # ---------------------------------------------------------------------
-@bot.message_handler(content_types=["photo", "video"])
+
+@bot.message_handler(content_types=["photo", "video", "document"])
 def handle_media(message):
     try:
         chat_id = message.chat.id
@@ -295,19 +390,30 @@ def handle_media(message):
         data = user_data.get(chat_id)
         if not data:
             return
-        photos: List[str] = data.get("photos", [])
+
+        media_list: List[Dict[str, Any]] = data.get("photos", [])
 
         file_id = None
+        media_type = None
+
         if message.photo:
             file_id = message.photo[-1].file_id
+            media_type = "photo"
         elif message.video:
             file_id = message.video.file_id
-        elif getattr(message, document, None):
+            media_type = "video"
+        elif message.document:
             file_id = message.document.file_id
+            media_type = "document"
 
         if file_id:
-            photos.append(file_id)
-            data["photos"] = photos
+            media_list.append(
+                {
+                    "file_id": file_id,
+                    "type": media_type,
+                }
+            )
+            data["photos"] = media_list
             user_data[chat_id] = data
 
             lang = get_lang_by_chat(chat_id)
@@ -328,8 +434,8 @@ def handle_media(message):
                 chat_id,
                 tr(
                     lang,
-                    "Фото сохранено. Выберите: «Добавить ещё фото» или «Готово».",
-                    "Foto saqtaldy. «Taǵy foto qosu» nemese «Gotovo» tańdańyz.",
+                    "Файл сохранён. Выберите: «Добавить ещё фото» или «Готово».",
+                    "Faıl saqtaldy. «Taǵy foto qosu» nemese «Gotovo» tańdańyz.",
                 ),
                 reply_markup=kb,
             )
@@ -340,12 +446,14 @@ def handle_media(message):
 # ---------------------------------------------------------------------
 # ОСНОВНОЙ ХЭНДЛЕР ТЕКСТА (весь диалог)
 # ---------------------------------------------------------------------
+
 @bot.message_handler(content_types=["text"])
 def handle_text(message):
     try:
         chat_id = message.chat.id
         text = (message.text or "").strip()
 
+        # Команды уже обработаны отдельными хэндлерами
         if text.startswith("/"):
             return
 
@@ -353,7 +461,7 @@ def handle_text(message):
         state = user_state.get(chat_id, STATE_NONE)
         data = user_data.get(chat_id)
 
-        # ������������� � ���� PHOTOS: ������ «�������� ��� �����»
+        # В состоянии PHOTOS: обработка текстов "Добавить ещё фото"
         if state == STATE_PHOTOS:
             add_more_text = tr(lang, "Добавить ещё фото", "Taǵy foto qosu")
             if text == add_more_text:
@@ -373,8 +481,8 @@ def handle_text(message):
                 tr(
                     lang,
                     "Чтобы подать обращение, введите /new.\n"
-                    "Чтобы проверить статус – /status <номер>.",
-                    "Jańa ótinish úshin /new, kúin tekserý úshin – /status <nómir>.",
+                    "Чтобы проверить статус – /status <номер>. ",
+                    "Jańa ótinish úshin /new, kúin tekserý úshin – /status <nómir>. ",
                 ),
                 reply_markup=main_menu_keyboard(lang),
             )
@@ -417,8 +525,9 @@ def handle_text(message):
 
         # 2. формат обращения
         if state == STATE_IDENTITY:
-            data["is_anonymous"] = ("аноним" in text.lower()
-                                    or "anonim" in text.lower())
+            data["is_anonymous"] = (
+                "аноним" in text.lower() or "anonim" in text.lower()
+            )
             user_data[chat_id] = data
             set_state(chat_id, STATE_PHOTOS)
 
@@ -744,7 +853,11 @@ def handle_text(message):
             data["user_id"] = message.from_user.id
             data["language"] = lang
 
-            public_id = create_appeal(data)
+            try:
+                public_id = send_appeal_to_backend(data)
+            except Exception as e:
+                handle_error(chat_id, "send_appeal_to_backend", e)
+                return
 
             user_state[chat_id] = STATE_NONE
             user_data.pop(chat_id, None)
@@ -771,6 +884,7 @@ def handle_text(message):
 # ---------------------------------------------------------------------
 # Вспомогательная: показать сводку перед отправкой
 # ---------------------------------------------------------------------
+
 def send_confirm(chat_id: int, lang: str, data: Dict[str, Any]) -> None:
     photos = data.get("photos") or []
     is_anonymous = data.get("is_anonymous", False)
@@ -815,8 +929,8 @@ def send_confirm(chat_id: int, lang: str, data: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------------------
+
 def main():
-    init_db()
     logging.info("User bot Qurylys qadagalau (telebot) started")
     bot.infinity_polling(skip_pending=True)
 
