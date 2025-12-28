@@ -102,11 +102,6 @@ STATE_STREET = "street"
 STATE_HOUSE = "house"
 STATE_LANDMARK = "landmark"
 STATE_DESCRIPTION = "description"
-
-# NEW: необязательный комментарий пользователя
-STATE_USER_COMMENT_ASK = "user_comment_ask"
-STATE_USER_COMMENT = "user_comment"
-
 STATE_VIOLATION_TYPE = "violation_type"
 STATE_DANGER = "danger"
 STATE_NAME = "name"
@@ -171,7 +166,6 @@ def send_appeal_to_backend(data: Dict[str, Any]) -> str:
     house = data.get("house") or ""
     landmark = data.get("landmark") or ""
     description = data.get("description") or ""
-    user_comment = data.get("user_comment") or ""
     violation_type = data.get("violation_type") or ""
     danger_level_text = data.get("danger_level") or ""
 
@@ -180,7 +174,6 @@ def send_appeal_to_backend(data: Dict[str, Any]) -> str:
         "house": house,
         "landmark": landmark,
         "description": description,
-        "userComment": user_comment or None,  # NEW: комментарий пользователя (опц.)
         "violationType": violation_type,
         "dangerText": danger_level_text,
         "isAnonymous": data.get("is_anonymous", False),
@@ -451,52 +444,6 @@ def handle_media(message):
 
 
 # ---------------------------------------------------------------------
-# Вспомогательная: показать выбор типа нарушения
-# ---------------------------------------------------------------------
-def send_violation_type_prompt(chat_id: int, lang: str) -> None:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    kb.row(
-        KeyboardButton(
-            tr(lang, "Строительство без разрешения", "Rúqsatsyz qurylys")
-        )
-    )
-    kb.row(
-        KeyboardButton(
-            tr(
-                lang,
-                "Самовольная пристройка / перепланировка",
-                "Óz betterińshe qurylys",
-            )
-        )
-    )
-    kb.row(
-        KeyboardButton(
-            tr(
-                lang,
-                "Захват дворовой / общественной территории",
-                "Aýlaq/qoǵamdyq aumaqty basyp alu",
-            )
-        )
-    )
-    kb.row(
-        KeyboardButton(
-            tr(
-                lang,
-                "Нарушение благоустройства",
-                "Abattylandyrý erejesin búzý",
-            )
-        )
-    )
-    kb.row(KeyboardButton(tr(lang, "Затрудняюсь ответить", "Aıta almaı́myn")))
-
-    bot.send_message(
-        chat_id,
-        tr(lang, "Выберите тип нарушения:", "Buzý túrin tańdańyz:"),
-        reply_markup=kb,
-    )
-
-
-# ---------------------------------------------------------------------
 # ОСНОВНОЙ ХЭНДЛЕР ТЕКСТА (весь диалог)
 # ---------------------------------------------------------------------
 
@@ -671,83 +618,48 @@ def handle_text(message):
         if state == STATE_DESCRIPTION:
             data["description"] = text
             user_data[chat_id] = data
+            set_state(chat_id, STATE_VIOLATION_TYPE)
 
-            # NEW: спросим про необязательный комментарий
-            set_state(chat_id, STATE_USER_COMMENT_ASK)
             kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
             kb.row(
-                KeyboardButton(tr(lang, "Да", "Iá")),
-                KeyboardButton(tr(lang, "Нет", "Joq")),
+                KeyboardButton(
+                    tr(lang, "Строительство без разрешения", "Rúqsatsyz qurylys")
+                )
             )
-            bot.send_message(
-                chat_id,
-                tr(
-                    lang,
-                    "Хотите добавить дополнительный комментарий к обращению? (необязательно)",
-                    "Ótiniske qosymsha kommentariı qosasız ba? (mіndetti emes)",
-                ),
-                reply_markup=kb,
-            )
-            return
-
-        # 7.1 спросить/добавить комментарий пользователя
-        if state == STATE_USER_COMMENT_ASK:
-            low = text.lower()
-
-            # более терпимый парсинг "да/нет" под обе локали
-            yes = (
-                ("да" in low)
-                or ("иә" in low)  # на всякий случай, если введут кириллицей
-                or ("иа" in low)
-                or ("iá" in low)
-                or (low == "ia")
-                or ("yes" in low)
-            )
-            no = (("нет" in low) or ("joq" in low) or ("жоқ" in low))
-
-            if yes:
-                set_state(chat_id, STATE_USER_COMMENT)
-                kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-                kb.row(KeyboardButton(tr(lang, "Пропустить", "Ótkizý")))
-                bot.send_message(
-                    chat_id,
+            kb.row(
+                KeyboardButton(
                     tr(
                         lang,
-                        "Напишите комментарий (например: уточнение по месту/времени).",
-                        "Kommentariıńyzdy jazıńyz (mysaly: oryn/uaqyt boıynsha naqtylaý).",
-                    ),
-                    reply_markup=kb,
+                        "Самовольная пристройка / перепланировка",
+                        "Óz betterińshe qurylys",
+                    )
                 )
-                return
-
-            if no:
-                data["user_comment"] = ""
-                user_data[chat_id] = data
-                set_state(chat_id, STATE_VIOLATION_TYPE)
-                send_violation_type_prompt(chat_id, lang)
-                return
+            )
+            kb.row(
+                KeyboardButton(
+                    tr(
+                        lang,
+                        "Захват дворовой / общественной территории",
+                        "Aýlaq/qoǵamdyq aumaqty basyp alu",
+                    )
+                )
+            )
+            kb.row(
+                KeyboardButton(
+                    tr(
+                        lang,
+                        "Нарушение благоустройства",
+                        "Abattylandyrý erejesin búzý",
+                    )
+                )
+            )
+            kb.row(KeyboardButton(tr(lang, "Затрудняюсь ответить", "Aıta almaı́myn")))
 
             bot.send_message(
                 chat_id,
-                tr(
-                    lang,
-                    "Пожалуйста, выберите «Да» или «Нет».",
-                    "«Iá» nemese «Joq» tańdańyz.",
-                ),
+                tr(lang, "Выберите тип нарушения:", "Buzý túrin tańdańyz:"),
+                reply_markup=kb,
             )
-            return
-
-        # 7.2 ввод комментария пользователя
-        if state == STATE_USER_COMMENT:
-            skip_text = tr(lang, "Пропустить", "Ótkizý")
-            if text == skip_text or text.lower() in ("нет", "joq", "жоқ"):
-                data["user_comment"] = ""
-            else:
-                data["user_comment"] = text
-
-            user_data[chat_id] = data
-            set_state(chat_id, STATE_VIOLATION_TYPE)
-            send_violation_type_prompt(chat_id, lang)
             return
 
         # 8. тип нарушения
@@ -991,12 +903,6 @@ def send_confirm(chat_id: int, lang: str, data: Dict[str, Any]) -> None:
         f"{tr(lang, 'Описание', 'Sypattama')}: {data.get('description', '')}",
         f"{tr(lang, 'Фото/видео', 'Foto/video')}: {len(photos)}",
     ]
-
-    # NEW: отображаем комментарий пользователя (если есть)
-    user_comment = (data.get("user_comment") or "").strip()
-    if user_comment:
-        lines.append(f"{tr(lang, 'Комментарий', 'Kommentariı')}: {user_comment}")
-
     if not is_anonymous:
         lines += [
             "",
