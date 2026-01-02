@@ -197,13 +197,18 @@ def send_appeal_to_backend(data: Dict[str, Any]) -> str:
     return public_id
 
 
-def fetch_appeal_status(public_id: str) -> Optional[Dict[str, Any]]:
+def fetch_appeal_status(public_id: str, telegram_user_id: int) -> Optional[Dict[str, Any]]:
     """
     Запрашиваем статус обращения по публичному номеру.
     GET /api/telegram/appeals/:appealNumber
+    Передаем telegramUserId, чтобы сервер отдал только "свои" обращения.
     """
     url = f"{API_BASE_URL}/telegram/appeals/{public_id}"
-    resp = requests.get(url, headers=_api_headers(), timeout=10)
+
+    headers = _api_headers()
+    headers["x-telegram-user-id"] = str(telegram_user_id)
+
+    resp = requests.get(url, headers=headers, timeout=10)
 
     if resp.status_code == 404:
         return None
@@ -335,7 +340,7 @@ def cmd_status(message):
         public_id = parts[1].strip()
 
         try:
-            appeal = fetch_appeal_status(public_id)
+            appeal = fetch_appeal_status(public_id, chat_id)
         except Exception as e:
             handle_error(chat_id, "cmd_status(fetch_appeal_status)", e)
             return
