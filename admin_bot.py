@@ -131,7 +131,7 @@ def handle_error(chat_id: int, where: str, e: Exception) -> None:
 def format_appeal_short(a: dict, lang: str) -> str:
     return (
         f"{a['public_id']} | {status_label(lang, a['status'])}\n"
-        f"{tr(lang,'Адрес','Мекенжай')}: г. Уральск, {a['street']}, {a['house']}\n"
+        f"{tr(lang,'Адрес','Мекенжай')}: {tr(lang, 'г. Уральск', 'Орал қ.')}, {a['street']}, {a['house']}\n"
         f"{tr(lang,'Тип','Түрі')}: {a['violation_type']}\n"
         f"{tr(lang,'Создано','Құрылған уақыты')}: {a['created_at']}\n"
     )
@@ -141,20 +141,20 @@ def format_appeal_full(a: dict, lang: str) -> str:
     return (
         f"{tr(lang,'Номер','Нөмір')}: {a['public_id']}\n"
         f"{tr(lang,'Статус','Күйі')}: {status_label(lang, a['status'])}\n"
-        f"{tr(lang,'Город','Қала')}: Уральск\n"
+        f"{tr(lang,'Город','Қала')}: {tr(lang, 'Уральск', 'Орал')}\n"
         f"{tr(lang,'Адрес','Мекенжай')}: {a['street']}, {a['house']}\n"
-        f"{tr(lang,'Ориентир','Ориентир')}: {a.get('landmark') or '-'}\n"
+        f"{tr(lang,'Ориентир','Бағдар')}: {a.get('landmark') or '-'}\n"
         f"{tr(lang,'Тип нарушения','Бұзу түрі')}: {a['violation_type']}\n"
         f"{tr(lang,'Опасность','Қауіп деңгейі')}: {a['danger_level']}\n"
         f"{tr(lang,'Описание','Сипаттама')}: {a['description']}\n"
         f"{tr(lang,'Исполнитель','Орындаушы')}: {a.get('executor') or '-'}\n"
         f"{tr(lang,'Заявитель','Өтініш беруші')}: "
         f"{a.get('applicant_name') or tr(lang,'анонимно','анонимді')}\n"
-        f"Телефон: {a.get('phone') or '-'}\n"
-        f"Email: {a.get('email') or '-'}\n"
+        f"{tr(lang,'Телефон','Телефон')}: {a.get('phone') or '-'}\n"
+        f"{tr(lang,'Email','Электрондық пошта')}: {a.get('email') or '-'}\n"
         f"{tr(lang,'Создано','Құрылған уақыты')}: {a['created_at']}\n"
         f"{tr(lang,'Срок реагирования','Жауап мерзімі')}: {a['deadline']}\n"
-        f"{tr(lang,'Комментарий','Комментарий')}: {a.get('last_comment') or '-'}\n"
+        f"{tr(lang,'Комментарий','Түсініктеме')}: {a.get('last_comment') or '-'}\n"
     )
 
 
@@ -173,7 +173,7 @@ def notify_user_about_status(appeal: dict, status_for_user: str, comment: str) -
         text = (
             f"Өтініш {appeal['public_id']} күйі жаңартылды.\n"
             f"Жаңа күйі: {status_for_user}\n"
-            f"Комментарий: {comment or '-'}"
+            f"Түсініктеме: {comment or '-'}"
         )
     else:
         text = (
@@ -200,7 +200,7 @@ def cmd_start(message):
         markup = InlineKeyboardMarkup()
         markup.row(
             InlineKeyboardButton("Русский", callback_data="lang_ru"),
-            InlineKeyboardButton("Qazaq tili", callback_data="lang_kk"),
+            InlineKeyboardButton("Қазақ тілі", callback_data="lang_kk"),
         )
         bot.send_message(
             chat_id,
@@ -223,8 +223,8 @@ def cb_language(call):
         bot.edit_message_text(
             tr(
                 lang,
-                "Админ-панель Qurylys qadagalau (г. Уральск).",
-                "Qurylys qadagalau әкімшілік панелі (Орал қ.).",
+                "Админ-панель «Құрылыс қадағалау» (г. Уральск).",
+                "«Құрылыс қадағалау» әкімшілік панелі (Орал қ.).",
             ),
             chat_id=chat_id,
             message_id=call.message.message_id,
@@ -382,7 +382,7 @@ def cmd_appeal(message):
                 tr(
                     lang,
                     "Укажите номер обращения, например:\n/appeal 25-000001",
-                    "Өтініш нөмірін көрсетіңіз, мысалы:\n/appeal 25-000001",
+                    "Өтініш нөмірін көрсетіңіз, мысалы: 25-000001",
                 ),
             )
             return
@@ -477,7 +477,7 @@ def handle_text(message):
                     f"{status_label(lang, status)}.\nКомментарий: {comment or '-'}",
                     f"{public_id} өтінішінің статусы "
                     f"{status_label(lang, status)} болып өзгертілді.\n"
-                    f"Комментарий: {comment or '-'}",
+                    f"Түсініктеме: {comment or '-'}",
                 ),
             )
             data["pending_status"] = None
@@ -543,8 +543,7 @@ def handle_text(message):
             tr(
                 lang,
                 "Используйте кнопки меню или команды /new, /all, /appeal, /export.",
-                "Мәзір батырмаларын немесе /new, /all, /appeal, /export "
-                "командаларын пайдаланыңыз.",
+                "Мәзір батырмаларын пайдаланыңыз.",
             ),
             reply_markup=main_menu_keyboard(lang),
         )
@@ -639,8 +638,8 @@ def cb_pick_status(call):
             tr(
                 lang,
                 "Введите комментарий для заявителя (или '-' если без комментария):",
-                "Өтініш берушіге арналған комментарийді жазыңыз "
-                "(немесе '-' егер комментарий болмаса):",
+                "Өтініш берушіге арналған түсініктемені жазыңыз "
+                "(немесе түсініктеме болмаса '-'):",
             ),
         )
     except Exception as e:

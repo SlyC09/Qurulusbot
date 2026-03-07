@@ -50,6 +50,19 @@ STATUS_REJECTED = "rejected"
 LANG_RU = "ru"
 LANG_KK = "kk"
 
+BTN_NEW_RU = "Подать обращение"
+BTN_STATUS_RU = "Проверить статус обращения"
+BTN_MAP_SHARE_RU = "Карта для дольщиков"
+BTN_MAP_ILLEGAL_RU = "Карта незаконного строительства"
+
+BTN_NEW_KK = "Жаңа өтініш беру"
+BTN_STATUS_KK = "Өтініш күйін тексеру"
+BTN_MAP_SHARE_KK = "Үлескерлер картасы"
+BTN_MAP_ILLEGAL_KK = "Заңсыз құрылыс картасы"
+
+MAP_SHARE_URL = "https://mapc.gutario.com/?status=approved"
+MAP_ILLEGAL_URL = "https://mapc.gutario.com/?"
+
 
 def tr(lang: str, ru: str, kk: str) -> str:
     return ru if lang == LANG_RU else kk
@@ -64,12 +77,12 @@ STATUS_LABELS_RU = {
     STATUS_REJECTED: "🚫 Отклонено",
 }
 STATUS_LABELS_KK = {
-    STATUS_NEW: "🆕 Jańa",
-    STATUS_IN_PROGRESS: "🟡 Óńdelýde",
-    STATUS_WAITING_INFO: "🕒 Qosymsha aqparat kútilýde",
-    STATUS_CLOSED_CONFIRMED: "✅ Jabýldy – buzý rastaldy",
-    STATUS_CLOSED_NOT_CONFIRMED: "✅ Jabýldy – buzý rastalmády",
-    STATUS_REJECTED: "🚫 Qabyldanbadı",
+    STATUS_NEW: "🆕 Жаңа",
+    STATUS_IN_PROGRESS: "🟡 Өңделуде",
+    STATUS_WAITING_INFO: "🕒 Қосымша ақпарат күтілуде",
+    STATUS_CLOSED_CONFIRMED: "✅ Жабылды – бұзу расталды",
+    STATUS_CLOSED_NOT_CONFIRMED: "✅ Жабылды – бұзу расталмады",
+    STATUS_REJECTED: "🚫 Қабылданбады",
 }
 
 
@@ -82,11 +95,15 @@ def status_label(lang: str, status: str) -> str:
 def main_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     if lang == LANG_RU:
-        kb.add(KeyboardButton("/new – Подать обращение"))
-        kb.add(KeyboardButton("/status – Статус обращения"))
+        kb.row(KeyboardButton(BTN_NEW_RU))
+        kb.row(KeyboardButton(BTN_STATUS_RU))
+        kb.row(KeyboardButton(BTN_MAP_SHARE_RU))
+        kb.row(KeyboardButton(BTN_MAP_ILLEGAL_RU))
     else:
-        kb.add(KeyboardButton("/new – Jańa ótinish"))
-        kb.add(KeyboardButton("/status – Ótinish kúiі"))
+        kb.row(KeyboardButton(BTN_NEW_KK))
+        kb.row(KeyboardButton(BTN_STATUS_KK))
+        kb.row(KeyboardButton(BTN_MAP_SHARE_KK))
+        kb.row(KeyboardButton(BTN_MAP_ILLEGAL_KK))
     return kb
 
 
@@ -110,6 +127,7 @@ STATE_PHONE = "phone"
 STATE_EMAIL = "email"
 STATE_CAN_CONTACT = "can_contact"
 STATE_CONFIRM = "confirm"
+STATE_STATUS_INPUT = "status_input"
 
 # chat_id -> state / data
 user_state: Dict[int, Optional[str]] = {}
@@ -137,7 +155,7 @@ def handle_error(chat_id: int, where: str, e: Exception) -> None:
             tr(
                 lang,
                 f"Произошла ошибка в боте ({where}): {e}",
-                f"Botte qate boldy ({where}): {e}",
+                f"Ботта қате болды ({where}): {e}",
             ),
         )
     except Exception:
@@ -217,6 +235,58 @@ def fetch_appeal_status(public_id: str, telegram_user_id: int) -> Optional[Dict[
     return resp.json()
 
 
+def send_status_info(chat_id: int, lang: str, public_id: str) -> None:
+    try:
+        appeal = fetch_appeal_status(public_id, chat_id)
+    except Exception as e:
+        handle_error(chat_id, "send_status_info(fetch_appeal_status)", e)
+        return
+
+    if not appeal:
+        bot.send_message(
+            chat_id,
+            tr(
+                lang,
+                f"Обращение с номером {public_id} не найдено.",
+                f"{public_id} нөмірлі өтініш табылмады.",
+            ),
+        )
+        return
+
+    status_code = appeal.get("status") or STATUS_NEW
+    st = status_label(lang, status_code)
+
+    comment = appeal.get("lastComment") or tr(
+        lang, "Комментарий отсутствует.", "Түсініктеме жоқ."
+    )
+
+    addr = appeal.get("address") or tr(lang, "г. Уральск", "Орал қ.")
+    deadline = appeal.get("deadline") or tr(lang, "не задан", "көрсетілмеген")
+
+    text = (
+        tr(lang, "Информация по обращению:", "Өтініш туралы ақпарат:")
+        + f"\n\n{tr(lang, 'Номер', 'Нөмір')}: {appeal.get('number') or public_id}"
+        + f"\n{tr(lang, 'Статус', 'Күйі')}: {st}"
+        + f"\n{tr(lang, 'Адрес', 'Мекенжай')}: {addr}"
+        + f"\n{tr(lang, 'Срок реагирования', 'Жауап мерзімі')}: {deadline}"
+        + f"\n\n{tr(lang, 'Комментарий', 'Түсініктеме')}: {comment}"
+    )
+    bot.send_message(chat_id, text)
+
+
+def send_map_link(chat_id: int, lang: str, kind: str) -> None:
+    if kind == "share":
+        title = tr(lang, BTN_MAP_SHARE_RU, BTN_MAP_SHARE_KK)
+        url = MAP_SHARE_URL
+    else:
+        title = tr(lang, BTN_MAP_ILLEGAL_RU, BTN_MAP_ILLEGAL_KK)
+        url = MAP_ILLEGAL_URL
+
+    kb = InlineKeyboardMarkup()
+    kb.row(InlineKeyboardButton(tr(lang, "Открыть карту", "Картаны ашу"), url=url))
+    bot.send_message(chat_id, f"{title}:\n{url}", reply_markup=kb)
+
+
 # ---------------------------------------------------------------------
 # /start + выбор языка (inline-кнопки)
 # ---------------------------------------------------------------------
@@ -231,11 +301,11 @@ def cmd_start(message):
         markup = InlineKeyboardMarkup()
         markup.row(
             InlineKeyboardButton("Русский", callback_data="lang_ru"),
-            InlineKeyboardButton("Qazaq tili", callback_data="lang_kk"),
+            InlineKeyboardButton("Қазақ тілі", callback_data="lang_kk"),
         )
         bot.send_message(
             chat_id,
-            "Выберите язык / Tıldı tańdańyz:",
+            "Выберите язык / Тілді таңдаңыз:",
             reply_markup=markup,
         )
     except Exception as e:
@@ -254,16 +324,12 @@ def cb_language(call):
         bot.edit_message_text(
             tr(
                 lang,
-                "Сервис Qurylys qadagalau принимает обращения "
+                "Сервис Qurylys baqylau принимает обращения "
                 "о возможных нарушениях в строительстве в г. Уральск.\n\n"
-                "Команды:\n"
-                "/new – подать новое обращение\n"
-                "/status <номер> – проверить статус",
-                "Qurylys qadagalau qyzmeti Oral qalasyndaǵy qurylysqa "
-                "qatýstı múmkindik buzýlar turaly ótinishterdi qab̆yldaıdy.\n\n"
-                "Búıryqtar:\n"
-                "/new – jańa ótinish\n"
-                "/status <nómir> – kúin tekserý",
+                "Выберите действие в меню ниже.",
+                "Құрылыс қадағалау қызметі Орал қаласындағы құрылысқа "
+                "қатысты мүмкін бұзулар туралы өтініштерді қабылдайды.\n\n"
+                "Төмендегі мәзірден әрекетті таңдаңыз.",
             ),
             chat_id=chat_id,
             message_id=call.message.message_id,
@@ -271,7 +337,7 @@ def cb_language(call):
 
         bot.send_message(
             chat_id,
-            tr(lang, "Выберите действие:", "Əreketti tańdańyz:"),
+            tr(lang, "Выберите действие:", "Әрекетті таңдаңыз:"),
             reply_markup=main_menu_keyboard(lang),
         )
     except Exception as e:
@@ -296,8 +362,8 @@ def cmd_new(message):
 
         kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         kb.row(
-            KeyboardButton(tr(lang, "Да, согласен", "Iá, kelisemіn")),
-            KeyboardButton(tr(lang, "Нет", "Joq")),
+            KeyboardButton(tr(lang, "Да, согласен", "Иә, келісемін")),
+            KeyboardButton(tr(lang, "Нет", "Жоқ")),
         )
 
         bot.send_message(
@@ -307,8 +373,8 @@ def cmd_new(message):
                 "Перед отправкой обращения нужно согласиться на обработку "
                 "персональных данных и передачу информации в уполномоченные "
                 "органы г. Уральск.\n\nВы согласны?",
-                "Ótinis jiberý úshin derekterdi óńdeýge jäne Oral qalasynyń "
-                "uәkiletti organdaryna jіberýge kelisý qajet.\n\nKelisесiz бе?",
+                "Өтініш жіберу үшін деректерді өңдеуге және Орал қаласының "
+                "уәкілетті органдарына жіберуге келісу қажет.\n\nКелісесіз бе?",
             ),
             reply_markup=kb,
         )
@@ -331,52 +397,14 @@ def cmd_status(message):
                 chat_id,
                 tr(
                     lang,
-                    "Введите номер обращения после команды, например:\n/status 25_000001",
-                    "Búıryqtan keıin ótinish nómirin jazıńyz, mysaly:\n/status 25_000001",
+                    "Введите номер обращения, например: 25_000001",
+                    "Өтініш нөмірін енгізіңіз, мысалы: 25_000001",
                 ),
             )
             return
 
         public_id = parts[1].strip()
-
-        try:
-            appeal = fetch_appeal_status(public_id, chat_id)
-        except Exception as e:
-            handle_error(chat_id, "cmd_status(fetch_appeal_status)", e)
-            return
-
-        if not appeal:
-            bot.send_message(
-                chat_id,
-                tr(
-                    lang,
-                    f"Обращение с номером {public_id} не найдено.",
-                    f"{public_id} nómirli ótinish tabylmady.",
-                ),
-            )
-            return
-
-        status_code = appeal.get("status") or STATUS_NEW
-        st = status_label(lang, status_code)
-
-        comment = appeal.get("lastComment") or tr(
-            lang, "Комментарий отсутствует.", "Kommentariı joq."
-        )
-
-        addr = appeal.get("address") or "г. Уральск"
-        deadline = appeal.get("deadline") or tr(
-            lang, "не задан", "kórsetilmegen"
-        )
-
-        text = (
-            tr(lang, "Информация по обращению:", "Ótinish turaly aqparat:")
-            + f"\n\n{tr(lang, 'Номер', 'Nómir')}: {appeal.get('number') or public_id}"
-            + f"\n{tr(lang, 'Статус', 'Kúi')}: {st}"
-            + f"\n{tr(lang, 'Адрес', 'Mekenjai')}: {addr}"
-            + f"\n{tr(lang, 'Срок реагирования', 'Jauap merzimi')}: {deadline}"
-            + f"\n\n{tr(lang, 'Комментарий', 'Kommentariı')}: {comment}"
-        )
-        bot.send_message(chat_id, text)
+        send_status_info(chat_id, lang, public_id)
     except Exception as e:
         handle_error(message.chat.id, "cmd_status", e)
 
@@ -429,10 +457,10 @@ def handle_media(message):
                     tr(
                         lang,
                         "Добавить ещё фото",
-                        "Taǵy foto qosu",
+                        "Қосымша фото қосу",
                     )
                 ),
-                KeyboardButton(tr(lang, "Готово", "Gotovo")),
+                KeyboardButton(tr(lang, "Готово", "Дайын")),
             )
 
             bot.send_message(
@@ -440,7 +468,7 @@ def handle_media(message):
                 tr(
                     lang,
                     "Файл сохранён. Выберите: «Добавить ещё фото» или «Готово».",
-                    "Faıl saqtaldy. «Taǵy foto qosu» nemese «Gotovo» tańdańyz.",
+                    "Файл сақталды. «Қосымша фото қосу» немесе «Дайын» таңдаңыз.",
                 ),
                 reply_markup=kb,
             )
@@ -466,16 +494,46 @@ def handle_text(message):
         state = user_state.get(chat_id, STATE_NONE)
         data = user_data.get(chat_id)
 
+        if text in (BTN_MAP_SHARE_RU, BTN_MAP_SHARE_KK):
+            send_map_link(chat_id, lang, "share")
+            return
+        if text in (BTN_MAP_ILLEGAL_RU, BTN_MAP_ILLEGAL_KK):
+            send_map_link(chat_id, lang, "illegal")
+            return
+
+        if state is STATE_NONE:
+            if text in (BTN_NEW_RU, BTN_NEW_KK):
+                cmd_new(message)
+                return
+            if text in (BTN_STATUS_RU, BTN_STATUS_KK):
+                user_data.setdefault(chat_id, {})["lang"] = lang
+                set_state(chat_id, STATE_STATUS_INPUT)
+                bot.send_message(
+                    chat_id,
+                    tr(
+                        lang,
+                        "Введите номер обращения:",
+                        "Өтініш нөмірін енгізіңіз:",
+                    ),
+                )
+                return
+
+        if state == STATE_STATUS_INPUT:
+            send_status_info(chat_id, lang, text)
+            user_data.setdefault(chat_id, {})["lang"] = lang
+            set_state(chat_id, STATE_NONE)
+            return
+
         # В состоянии PHOTOS: обработка текстов "Добавить ещё фото"
         if state == STATE_PHOTOS:
-            add_more_text = tr(lang, "Добавить ещё фото", "Taǵy foto qosu")
+            add_more_text = tr(lang, "Добавить ещё фото", "Қосымша фото қосу")
             if text == add_more_text:
                 bot.send_message(
                     chat_id,
                     tr(
                         lang,
                         "Отправьте ещё фото или видео объекта.",
-                        "Taǵy foto nemese video jiberińiz.",
+                        "Қосымша фото немесе видео жіберіңіз.",
                     ),
                 )
                 return
@@ -485,9 +543,8 @@ def handle_text(message):
                 chat_id,
                 tr(
                     lang,
-                    "Чтобы подать обращение, введите /new.\n"
-                    "Чтобы проверить статус – /status <номер>. ",
-                    "Jańa ótinish úshin /new, kúin tekserý úshin – /status <nómir>. ",
+                    "Выберите действие кнопками меню ниже.",
+                    "Жаңа өтініш жіберу немесе күйін тексеру үшін мәзірдегі батырманы таңдаңыз.",
                 ),
                 reply_markup=main_menu_keyboard(lang),
             )
@@ -495,7 +552,7 @@ def handle_text(message):
 
         # 1. согласие
         if state == STATE_CONSENT:
-            if "нет" in text.lower() or "joq" in text.lower():
+            if "нет" in text.lower() or "жоқ" in text.lower():
                 user_state[chat_id] = STATE_NONE
                 user_data.pop(chat_id, None)
                 bot.send_message(
@@ -503,9 +560,9 @@ def handle_text(message):
                     tr(
                         lang,
                         "Без согласия я не могу принять обращение. "
-                        "Если передумаете – введите /new.",
-                        "Kelisim bolmasa, ótinish qab̆yldanbaıdy. "
-                        "Qaıta ózgertseńiz – /new jazıńyz.",
+                        "Если передумаете, нажмите «Подать обращение».",
+                        "Келісім болмаса, өтініш қабылданбайды. "
+                        "Қайта жіберу үшін «Жаңа өтініш беру» батырмасын басыңыз.",
                     ),
                     reply_markup=main_menu_keyboard(lang),
                 )
@@ -514,15 +571,15 @@ def handle_text(message):
             set_state(chat_id, STATE_IDENTITY)
             kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
             kb.row(
-                KeyboardButton(tr(lang, "От своего имени", "Óz atyńyzdan")),
-                KeyboardButton(tr(lang, "Анонимно", "Anonimdi")),
+                KeyboardButton(tr(lang, "От своего имени", "Өз атыңыздан")),
+                KeyboardButton(tr(lang, "Анонимно", "Анонимді")),
             )
             bot.send_message(
                 chat_id,
                 tr(
                     lang,
                     "Вы хотите подать обращение:\n1) От своего имени\n2) Анонимно",
-                    "Ótinisti qalaı jiberesiz:\n1) Óz atyńyzdan\n2) Anonimdi túrde",
+                    "Өтіністі қалай жібересіз:\n1) Өз атыңыздан\n2) Анонимді түрде",
                 ),
                 reply_markup=kb,
             )
@@ -537,7 +594,7 @@ def handle_text(message):
             set_state(chat_id, STATE_PHOTOS)
 
             kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-            kb.row(KeyboardButton(tr(lang, "Готово", "Gotovo")))
+            kb.row(KeyboardButton(tr(lang, "Готово", "Дайын")))
 
             bot.send_message(
                 chat_id,
@@ -545,9 +602,9 @@ def handle_text(message):
                     lang,
                     "Прикрепите фото или видео объекта (можно из галереи). "
                     "Отправьте 1–5 файлов. Когда закончите, нажмите кнопку «Готово».",
-                    "Nysanǵa qatıstı foto nemese video jiberińiz "
-                    "(galereıadan bolady). 1–5 faıl. "
-                    "Aıaqtaganda «Gotovo» batyrmasyn basyńyz.",
+                    "Нысанға қатысты фото немесе видео жіберіңіз "
+                    "(галереядан болады). 1–5 файл. "
+                    "Аяқтағанда «Дайын» батырмасын басыңыз.",
                 ),
                 reply_markup=kb,
             )
@@ -561,8 +618,8 @@ def handle_text(message):
                 tr(
                     lang,
                     "Укажите улицу объекта в г. Уральск (например: «ул. Победы»).",
-                    "Oral qalasyndaǵy nysan kóshesin kórsetińiz "
-                    "(mysaly: «Pobeda kóshesi»).",
+                    "Орал қаласындағы нысан көшесін көрсетіңіз "
+                    "(мысалы: «Жеңіс көшесі»).",
                 ),
             )
             return
@@ -577,7 +634,7 @@ def handle_text(message):
                 tr(
                     lang,
                     "Теперь введите дом / участок (например: «дом 10»).",
-                    "Endi úı / telem nómirin jazıńyz (mysaly: «10-úı»).",
+                    "Енді үй / телім нөмірін жазыңыз (мысалы: «10-үй»).",
                 ),
             )
             return
@@ -593,15 +650,15 @@ def handle_text(message):
                     lang,
                     "Уточните ориентир (двор, рядом с чем стройка). "
                     "Если уточнять нечего – напишите «Нет».",
-                    "Qosymsha orientir jazıńyz (aýlaq, qasynda ne bar). "
-                    "Eger qajet emes bolsa – «Joq» dep jazyńyz.",
+                    "Қосымша ориентир жазыңыз (аула, қасында не бар). "
+                    "Егер қажет емес болса – «Жоқ» деп жазыңыз.",
                 ),
             )
             return
 
         # 6. ориентир
         if state == STATE_LANDMARK:
-            if text.lower() in ("нет", "joq"):
+            if text.lower() in ("нет", "жоқ"):
                 data["landmark"] = ""
             else:
                 data["landmark"] = text
@@ -613,8 +670,8 @@ def handle_text(message):
                     lang,
                     "Опишите ситуацию: что строят, почему считаете это "
                     "незаконным и с какого времени.",
-                    "Jagdaídy sypattanyz: naqty ne salynyp jatyr, "
-                    "nege zańsyz dep oılaísyz, qaı uaqyttan beri.",
+                    "Жағдайды сипаттаңыз: нақты не салынып жатыр, "
+                    "неге заңсыз деп ойлайсыз, қай уақыттан бері.",
                 ),
             )
             return
@@ -628,7 +685,7 @@ def handle_text(message):
             kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
             kb.row(
                 KeyboardButton(
-                    tr(lang, "Строительство без разрешения", "Rúqsatsyz qurylys")
+                    tr(lang, "Строительство без разрешения", "Рұқсатсыз құрылыс")
                 )
             )
             kb.row(
@@ -636,7 +693,7 @@ def handle_text(message):
                     tr(
                         lang,
                         "Самовольная пристройка / перепланировка",
-                        "Óz betterińshe qurylys",
+                        "Өз бетінше құрылыс",
                     )
                 )
             )
@@ -645,7 +702,7 @@ def handle_text(message):
                     tr(
                         lang,
                         "Захват дворовой / общественной территории",
-                        "Aýlaq/qoǵamdyq aumaqty basyp alu",
+                        "Аула/қоғамдық аумақты басып алу",
                     )
                 )
             )
@@ -654,15 +711,15 @@ def handle_text(message):
                     tr(
                         lang,
                         "Нарушение благоустройства",
-                        "Abattylandyrý erejesin búzý",
+                        "Абаттандыру ережесін бұзу",
                     )
                 )
             )
-            kb.row(KeyboardButton(tr(lang, "Затрудняюсь ответить", "Aıta almaı́myn")))
+            kb.row(KeyboardButton(tr(lang, "Затрудняюсь ответить", "Айта алмаймын")))
 
             bot.send_message(
                 chat_id,
-                tr(lang, "Выберите тип нарушения:", "Buzý túrin tańdańyz:"),
+                tr(lang, "Выберите тип нарушения:", "Бұзу түрін таңдаңыз:"),
                 reply_markup=kb,
             )
             return
@@ -676,12 +733,12 @@ def handle_text(message):
             kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
             kb.row(
                 KeyboardButton(
-                    tr(lang, "Да, есть явная опасность", "Iá, ańǵarılǵan qaýip bar")
+                    tr(lang, "Да, есть явная опасность", "Иә, айқын қауіп бар")
                 )
             )
             kb.row(
                 KeyboardButton(
-                    tr(lang, "Есть потенциальная опасность", "Múmkindik qaýip bar")
+                    tr(lang, "Есть потенциальная опасность", "Потенциалды қауіп бар")
                 )
             )
             kb.row(
@@ -689,7 +746,7 @@ def handle_text(message):
                     tr(
                         lang,
                         "Нет угроз, только нарушение документов",
-                        "Qaýip joq, tek qujattar búzylǵan",
+                        "Қауіп жоқ, тек құжаттар бұзылған",
                     )
                 )
             )
@@ -698,7 +755,7 @@ def handle_text(message):
                 tr(
                     lang,
                     "Есть ли, по вашему мнению, угроза безопасности?",
-                    "Óz oııńyzsha qaýipsizdikke qaýip bar ma?",
+                    "Өз ойыңызша қауіпсіздікке қауіп бар ма?",
                 ),
                 reply_markup=kb,
             )
@@ -720,7 +777,7 @@ def handle_text(message):
                 tr(
                     lang,
                     "Укажите ваши ФИО (для официального ответа).",
-                    "Resmı jauap úshin aty-jónińizdi jazıńyz.",
+                    "Ресми жауап үшін аты-жөніңізді жазыңыз.",
                 ),
             )
             return
@@ -732,23 +789,26 @@ def handle_text(message):
             set_state(chat_id, STATE_CONTACT_METHOD)
 
             kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-            kb.row(KeyboardButton("Телефон"), KeyboardButton("Email"))
+            kb.row(
+                KeyboardButton(tr(lang, "Телефон", "Телефон")),
+                KeyboardButton(tr(lang, "Email", "Электрондық пошта")),
+            )
             bot.send_message(
                 chat_id,
-                tr(lang, "Как с вами лучше связаться?", "Qaı arqyly baılanysqan jaqsy?"),
+                tr(lang, "Как с вами лучше связаться?", "Сізбен қалай байланысқан дұрыс?"),
                 reply_markup=kb,
             )
             return
 
         # 11. способ связи
         if state == STATE_CONTACT_METHOD:
-            if "mail" in text.lower():
+            if "mail" in text.lower() or "пошта" in text.lower():
                 data["contact_method"] = "email"
                 user_data[chat_id] = data
                 set_state(chat_id, STATE_EMAIL)
                 bot.send_message(
                     chat_id,
-                    tr(lang, "Введите ваш email:", "Email mekenjaıyn jazıńyz:"),
+                    tr(lang, "Введите ваш email:", "Электрондық поштаңызды жазыңыз:"),
                 )
             else:
                 data["contact_method"] = "phone"
@@ -759,7 +819,7 @@ def handle_text(message):
                     tr(
                         lang,
                         "Введите номер телефона в формате +7...",
-                        "+7 formatynda telefon nómirin jazıńyz...",
+                        "+7 форматында телефон нөмірін жазыңыз...",
                     ),
                 )
             return
@@ -773,7 +833,7 @@ def handle_text(message):
             kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
             kb.row(
                 KeyboardButton(
-                    tr(lang, "Да, можно связаться", "Iá, baılanysýǵa bolady")
+                    tr(lang, "Да, можно связаться", "Иә, байланысуға болады")
                 )
             )
             kb.row(
@@ -781,7 +841,7 @@ def handle_text(message):
                     tr(
                         lang,
                         "Нет, только письменный ответ",
-                        "Joq, tek jazbasha jauap",
+                        "Жоқ, тек жазбаша жауап",
                     )
                 )
             )
@@ -790,7 +850,7 @@ def handle_text(message):
                 tr(
                     lang,
                     "Можно ли с вами связаться для уточнения информации?",
-                    "Qosymsha aqparat úshin sizben baılanysýǵa bola ma?",
+                    "Қосымша ақпарат үшін сізбен байланысуға бола ма?",
                 ),
                 reply_markup=kb,
             )
@@ -805,7 +865,7 @@ def handle_text(message):
             kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
             kb.row(
                 KeyboardButton(
-                    tr(lang, "Да, можно связаться", "Iá, baılanysýǵa bolady")
+                    tr(lang, "Да, можно связаться", "Иә, байланысуға болады")
                 )
             )
             kb.row(
@@ -813,7 +873,7 @@ def handle_text(message):
                     tr(
                         lang,
                         "Нет, только письменный ответ",
-                        "Joq, tek jazbasha jauap",
+                        "Жоқ, тек жазбаша жауап",
                     )
                 )
             )
@@ -822,7 +882,7 @@ def handle_text(message):
                 tr(
                     lang,
                     "Можно ли с вами связаться для уточнения информации?",
-                    "Qosymsha aqparat úshin sizben baılanysýǵa bola ma?",
+                    "Қосымша ақпарат үшін сізбен байланысуға бола ма?",
                 ),
                 reply_markup=kb,
             )
@@ -831,7 +891,7 @@ def handle_text(message):
         # 14. можно ли связаться
         if state == STATE_CAN_CONTACT:
             data["can_contact"] = not (
-                "нет" in text.lower() or "joq" in text.lower()
+                "нет" in text.lower() or "жоқ" in text.lower()
             )
             user_data[chat_id] = data
             set_state(chat_id, STATE_CONFIRM)
@@ -840,15 +900,15 @@ def handle_text(message):
 
         # 15. подтверждение
         if state == STATE_CONFIRM:
-            if ("отмен" in text.lower()) or ("boldyr" in text.lower()):
+            if ("отмен" in text.lower()) or ("болдыр" in text.lower()):
                 user_state[chat_id] = STATE_NONE
                 user_data.pop(chat_id, None)
                 bot.send_message(
                     chat_id,
                     tr(
                         lang,
-                        "Обращение отменено. Чтобы начать заново – введите /new.",
-                        "Ótinish boldyrý boldy. Qaıta bastau úshin – /new jazıńyz.",
+                        "Обращение отменено. Чтобы начать заново, нажмите «Подать обращение».",
+                        "Өтініш тоқтатылды. Қайта бастау үшін «Жаңа өтініш беру» батырмасын басыңыз.",
                     ),
                     reply_markup=main_menu_keyboard(lang),
                 )
@@ -873,10 +933,10 @@ def handle_text(message):
                     lang,
                     f"Ваше обращение зарегистрировано.\nНомер: {public_id}\n"
                     "Сохраните этот номер – по нему можно проверить статус "
-                    f"командой /status {public_id}",
-                    f"Ótinisingiz tirkelді.\nNómiri: {public_id}\n"
-                    "Osy nómirdi saqtyńyz – kúin /status {public_id} búıryǵymen "
-                    "tekserýge bolady.",
+                    "через кнопку «Проверить статус обращения».",
+                    f"Өтінішіңіз тіркелді.\nНөмірі: {public_id}\n"
+                    "Осы нөмірді сақтаңыз – күйін «Өтініш күйін тексеру» "
+                    "батырмасы арқылы тексеруге болады.",
                 ),
                 reply_markup=main_menu_keyboard(lang),
             )
@@ -895,36 +955,36 @@ def send_confirm(chat_id: int, lang: str, data: Dict[str, Any]) -> None:
     is_anonymous = data.get("is_anonymous", False)
 
     lines = [
-        tr(lang, "Проверьте данные обращения:", "Ótinish derekterin tekserińiz:"),
+        tr(lang, "Проверьте данные обращения:", "Өтініш деректерін тексеріңіз:"),
         "",
-        f"{tr(lang, 'Город', 'Qala')}: Уральск",
-        f"{tr(lang, 'Улица', 'Kóshe')}: {data.get('street', '')}",
-        f"{tr(lang, 'Дом / участок', 'Úi / telem')}: {data.get('house', '')}",
-        f"{tr(lang, 'Ориентир', 'Orientir')}: {data.get('landmark', '')}",
+        f"{tr(lang, 'Город', 'Қала')}: {tr(lang, 'Уральск', 'Орал')}",
+        f"{tr(lang, 'Улица', 'Көше')}: {data.get('street', '')}",
+        f"{tr(lang, 'Дом / участок', 'Үй / телім')}: {data.get('house', '')}",
+        f"{tr(lang, 'Ориентир', 'Бағдар')}: {data.get('landmark', '')}",
         "",
-        f"{tr(lang, 'Тип нарушения', 'Buzý túri')}: {data.get('violation_type', '')}",
-        f"{tr(lang, 'Опасность', 'Qaýip deńgeıi')}: {data.get('danger_level', '')}",
+        f"{tr(lang, 'Тип нарушения', 'Бұзу түрі')}: {data.get('violation_type', '')}",
+        f"{tr(lang, 'Опасность', 'Қауіп деңгейі')}: {data.get('danger_level', '')}",
         "",
-        f"{tr(lang, 'Описание', 'Sypattama')}: {data.get('description', '')}",
-        f"{tr(lang, 'Фото/видео', 'Foto/video')}: {len(photos)}",
+        f"{tr(lang, 'Описание', 'Сипаттама')}: {data.get('description', '')}",
+        f"{tr(lang, 'Фото/видео', 'Фото/видео')}: {len(photos)}",
     ]
     if not is_anonymous:
         lines += [
             "",
-            f"{tr(lang, 'Заявитель', 'Ótinisshi')}: {data.get('applicant_name', '')}",
+            f"{tr(lang, 'Заявитель', 'Өтініш беруші')}: {data.get('applicant_name', '')}",
             f"Телефон: {data.get('phone', '')}",
-            f"Email: {data.get('email', '')}",
+            f"{tr(lang, 'Email', 'Электрондық пошта')}: {data.get('email', '')}",
         ]
     else:
         lines.append("")
-        lines.append(tr(lang, "Обращение анонимное.", "Ótinish anonimdik."))
+        lines.append(tr(lang, "Обращение анонимное.", "Өтініш анонимді."))
 
     lines.append("")
     lines.append(
         tr(
             lang,
             "Отправить обращение?\nНапишите «Отправить» или «Отменить».",
-            "Ótinish jiberilsin be?\n«Jiberý» nemese «Boldyrmaý» dep jazyńyz.",
+            "Өтініш жіберілсін бе?\n«Жіберу» немесе «Болдырмау» деп жазыңыз.",
         )
     )
 
