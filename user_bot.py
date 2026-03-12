@@ -9,6 +9,7 @@ from telebot.types import (
     KeyboardButton,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    WebAppInfo,
 )
 
 # ---------------------------------------------------------------------
@@ -97,13 +98,13 @@ def main_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
     if lang == LANG_RU:
         kb.row(KeyboardButton(BTN_NEW_RU))
         kb.row(KeyboardButton(BTN_STATUS_RU))
-        kb.row(KeyboardButton(BTN_MAP_SHARE_RU))
-        kb.row(KeyboardButton(BTN_MAP_ILLEGAL_RU))
+        kb.row(KeyboardButton(BTN_MAP_SHARE_RU, web_app=WebAppInfo(url=MAP_SHARE_URL)))
+        kb.row(KeyboardButton(BTN_MAP_ILLEGAL_RU, web_app=WebAppInfo(url=MAP_ILLEGAL_URL)))
     else:
         kb.row(KeyboardButton(BTN_NEW_KK))
         kb.row(KeyboardButton(BTN_STATUS_KK))
-        kb.row(KeyboardButton(BTN_MAP_SHARE_KK))
-        kb.row(KeyboardButton(BTN_MAP_ILLEGAL_KK))
+        kb.row(KeyboardButton(BTN_MAP_SHARE_KK, web_app=WebAppInfo(url=MAP_SHARE_URL)))
+        kb.row(KeyboardButton(BTN_MAP_ILLEGAL_KK, web_app=WebAppInfo(url=MAP_ILLEGAL_URL)))
     return kb
 
 
